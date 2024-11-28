@@ -79,3 +79,5 @@ spec:
         8 }}
       serviceAccountName: {{ include "soperator.fullname" . }}-controller-manager
       terminationGracePeriodSeconds: 10
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
