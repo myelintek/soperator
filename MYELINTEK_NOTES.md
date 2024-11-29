@@ -6,13 +6,17 @@
 ## Pre-requisites
 
 1. Kubernetes cluster available.
+   1. At least a CPU-only node out of GPU Operator and at least a GPU node within GPU Operator.
+   1. Network plugin: `calico` (Kubespray default)
+   1. kube-proxy mode: `ipvs` (Kubespray default) -> `iptables`
+   1. `local-path` storage class is available, needed in creating worker PVs.
 1. NFS service available, needed in creating some PVs.
-1. At least a CPU-only node out of GPU Operator and at least a GPU node within GPU Operator.
-1. `local-path` storage class is available, needed in creating worker PVs.
 1. `cr.myelintek.com/soperator/slurm-operator:1.15.3-p3` is available, which has be built as follows
    ```bash
    docker build -t cr.myelintek.com/soperator/slurm-operator:1.15.3-p3 .
    ```
+
+![workloads-1](rsc/workloads-1.png)
 
 ## Limitations
 
@@ -31,6 +35,27 @@ Specific to our deployment:
 
 1. No accounting support.
 1. Single-controller only.
+1. Routing configuration may be slower due to kube-proxy operating in `iptables` mode.
+   > soperator is well tesed with the `cilium` network plugin and kube-proxy replated by `cilium`, where the performance is exptected better.
+1. The nccl benchmark cronjab may fail due to insufficient node resources.
+   ```console
+   Link users from jail
+   Bind-mount slurm configs from K8S config map
+   Bind-mount munge key from K8S secret
+   Starting munge
+   Waiting until munge started
+   Start NCCL test benchmark
+   1 GPUs on each node are going to be benchmarked
+   srun: error: CPU count per node can not be satisfied
+   srun: error: Unable to allocate resources: Requested node configuration is not available
+   srun: error: CPU count per node can not be satisfied
+   srun: error: Unable to allocate resources: Requested node configuration is not available
+   All exit codes not 0 - 1
+   1
+   ```
+   ![nccl-bench-1](rsc/nccl-bench-1.png)
+   ![nccl-bench-2](rsc/nccl-bench-2.png)
+   ![nccl-bench-3](rsc/nccl-bench-3.png)
 
 ## Deployment
 
@@ -85,7 +110,97 @@ To log in to the Slurm service:
    root@login-0:~# sinfo
    PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
    main*        up   infinite      2   idle worker-[0-1]
-   root@login-0:~#
+   root@login-0:~# srun -N 1 -p main --pty /bin/bash
+   root@worker-1:~# module available
+   bash: module: command not found
+   root@worker-1:~# nvidia-smi
+   Thu Nov 28 08:22:51 2024
+   +-----------------------------------------------------------------------------------------+
+   | NVIDIA-SMI 550.127.05             Driver Version: 550.127.05     CUDA Version: 12.4     |
+   |-----------------------------------------+------------------------+----------------------+
+   | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+   | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+   |                                         |                        |               MIG M. |
+   |=========================================+========================+======================|
+   |   0  NVIDIA GeForce RTX 2080 Ti     On  |   00000000:00:08.0 Off |                  N/A |
+   | 27%   30C    P8             14W /  260W |       1MiB /  11264MiB |      0%      Default |
+   |                                         |                        |                  N/A |
+   +-----------------------------------------+------------------------+----------------------+
+   
+   +-----------------------------------------------------------------------------------------+
+   | Processes:                                                                              |
+   |  GPU   GI   CI        PID   Type   Process name                              GPU Memory |
+   |        ID   ID                                                               Usage      |
+   |=========================================================================================|
+   |  No running processes found                                                             |
+   +-----------------------------------------------------------------------------------------+
+   root@worker-1:~#
+   exit
+   root@login-0:~# scontrol show node worker-0
+   NodeName=worker-0 Arch=x86_64 CoresPerSocket=1
+      CPUAlloc=0 CPUEfctv=10 CPUTot=10 CPULoad=0.92
+      AvailableFeatures=(null)
+      ActiveFeatures=(null)
+      Gres=gpu:nvidia_geforce_rtx_2080_ti:1(S:0-9)
+      NodeAddr=10.233.83.7 NodeHostName=worker-0 Version=24.05.2
+      OS=Linux 5.15.0-91-generic #101-Ubuntu SMP Tue Nov 14 13:30:08 UTC 2023
+      RealMemory=15708 AllocMem=0 FreeMem=467 Sockets=10 Boards=1
+      State=IDLE+DYNAMIC_NORM ThreadsPerCore=1 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
+      Partitions=main
+      BootTime=2024-11-27T07:27:26 SlurmdStartTime=2024-11-28T06:33:33
+      LastBusyTime=2024-11-28T02:10:39 ResumeAfterTime=None
+      CfgTRES=cpu=10,mem=15708M,billing=10
+      AllocTRES=
+      CurrentWatts=0 AveWatts=0
+   ```
+
+Example: resnet inference
+
+1. Access with SSH on the host machine.
+1. Download the container image.
+   - The `nvcr.io/nvidia/tensorflow:23.03-tf1-py3` image in the Taipei-1 tutorial has OpenMPI 4.1.4, which embeds PMIxv3 client and cannot recognize the PMIxv5 environment in our deployed Slurm cluster. We use the currently latest `nvcr.io/nvidia/tensorflow:24.11-tf2-py3` image instead.
+     > Issue: OMPI v4.x fails when built against PMIx v5: https://github.com/open-mpi/ompi/issues/10307
+   - We used a custom tmp directory at `/root/mytmp`, sinche the default `/tmp` directory has only ~8GB in size, which is issuficient for extraction during image saving.
+   ```console
+   root@login-0:~# mkdir -p ~/mytmp
+   root@login-0:~# TMPDIR=~/mytmp srun --ntasks=1 -p main --container-image nvcr.io#nvidia/tensorflow:24.11-tf2-py3 --container-save ./tf2411.sqsh true
+   pyxis: importing docker image: nvcr.io#nvidia/tensorflow:24.11-tf2-py3
+   pyxis: imported docker image: nvcr.io#nvidia/tensorflow:24.11-tf2-py3
+   pyxis: exported container pyxis_8.0 to ./tf2411.sqsh
+   ```
+1. Run single-node inference.
+   ```console
+   root@login-0:~# srun -N 1 -p main --exclusive --mpi=pmix_v5 --gres=gpu:1 --ntasks-per-node 1 --container-image ~/tf2411.sqsh --container-writable python /workspace/nvidia-examples/cnn/resnet.py -b 32 -i 100
+   ... skip hundurends of lines of messages ...
+   global_step: 10 images_per_sec: 8.0
+   global_step: 20 images_per_sec: 621.2
+   global_step: 30 images_per_sec: 624.1
+   global_step: 40 images_per_sec: 632.1
+   global_step: 50 images_per_sec: 637.1
+   global_step: 60 images_per_sec: 635.2
+   global_step: 70 images_per_sec: 632.2
+   global_step: 80 images_per_sec: 624.2
+   global_step: 90 images_per_sec: 632.7
+   global_step: 100 images_per_sec: 633.4
+   epoch: 0 time_taken: 44.4
+   100/100 - 44s - loss: 11.5346 - top1: 0.2256 - top5: 0.2819 - 44s/epoch - 444ms/step
+   ```
+1. Run multi-node inference.
+   ```console
+   root@login-0:~# srun -N 2 -p main --exclusive --mpi=pmix_v5 --gres=gpu:1 --ntasks-per-node 1 --container-image ~/tf2411.sqsh --container-writable python /workspace/nvidia-examples/cnn/resnet.py -b 64 -i 100
+   ...
+   global_step: 10 images_per_sec: 13.7
+   global_step: 20 images_per_sec: 114.1
+   global_step: 30 images_per_sec: 115.5
+   global_step: 40 images_per_sec: 119.9
+   global_step: 50 images_per_sec: 112.1
+   global_step: 60 images_per_sec: 113.7
+   global_step: 70 images_per_sec: 108.5
+   global_step: 80 images_per_sec: 101.2
+   global_step: 90 images_per_sec: 110.6
+   global_step: 100 images_per_sec: 105.9
+   epoch: 0 time_taken: 197.0
+   100/100 - 197s - loss: 11.1287 - top1: 0.4095 - top5: 0.4917 - 197s/epoch - 2s/step
    ```
 
 ## Changes
