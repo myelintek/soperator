@@ -23,10 +23,14 @@ k8sNodeFilters:
         requiredDuringSchedulingIgnoredDuringExecution:
           nodeSelectorTerms:
             - matchExpressions:
-                - key: "nebius.com/node-group-id"
+                # - key: "nebius.com/node-group-id"
+                #   operator: In
+                #   values:
+                #     - "node-group-id-here"
+                - key: nvidia.com/gpu.present
                   operator: In
                   values:
-                    - "node-group-id-here"
+                    - "true"
     tolerations:
       - key: nvidia.com/gpu
         operator: Exists
@@ -37,10 +41,12 @@ k8sNodeFilters:
         requiredDuringSchedulingIgnoredDuringExecution:
           nodeSelectorTerms:
             - matchExpressions:
-                - key: "nebius.com/node-group-id"
-                  operator: In
-                  values:
-                    - "node-group-id-here"
+                # - key: "nebius.com/node-group-id"
+                #   operator: In
+                #   values:
+                #     - "node-group-id-here"
+                - key: nvidia.com/gpu.present
+                  operator: DoesNotExist
 # Sources for the volumes used in Slurm node specifications
 volumeSources:
   - name: controller-spool
@@ -222,7 +228,9 @@ slurmNodes:
       # imagePullSecrets: []
       # initContainers: []
       # livenessProbe: {}
-      # nodeSelector: {}
+      nodeSelector: {}
+      # nodeSelector:
+      #   nvidia.com/gpu.present: "true"
       # podMetadata: {}
       # securityContext: {}
       # serviceAccountName: ""
@@ -239,7 +247,8 @@ slurmNodes:
       #     cpu: "50m"
       #     memory: "64Mi"
   controller:
-    size: 2
+    # size: 2
+    size: 1
     k8sNodeFilterName: "no-gpu"
     slurmctld:
       imagePullPolicy: "IfNotPresent"
@@ -270,25 +279,34 @@ slurmNodes:
       appArmorProfile: "unconfined"
       port: 6818
       resources:
-        cpu: "156000m"
-        memory: "1220Gi"
-        ephemeralStorage: "55Gi"
-        gpu: 8
+        # cpu: "156000m"
+        cpu: "4000m"
+        # memory: "1220Gi"
+        memory: "10Gi"
+        # ephemeralStorage: "55Gi"
+        ephemeralStorage: "32Gi"
+        # gpu: 8
+        gpu: 1
     munge:
       imagePullPolicy: "IfNotPresent"
       appArmorProfile: "unconfined"
       resources:
-        cpu: "2000m"
-        memory: "4Gi"
-        ephemeralStorage: "5Gi"
+        # cpu: "2000m"
+        cpu: "1000m"
+        # memory: "4Gi"
+        memory: "1.5Gi"
+        # ephemeralStorage: "5Gi"
+        ephemeralStorage: "2Gi"
     volumes:
       spool:
         volumeClaimTemplateSpec:
-          storageClassName: "nebius-network-ssd"
+          # storageClassName: "nebius-network-ssd"
+          storageClassName: "local-path"
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:
-              storage: "128Gi"
+              # storage: "128Gi"
+              storage: "30Gi"
       jail:
         volumeSourceName: "jail"
       jailSubMounts: []
@@ -297,7 +315,8 @@ slurmNodes:
       #          mountPath: "/mlperf-sd"
       #          volumeSourceName: "mlperf-sd"
   login:
-    size: 2
+    # size: 2
+    size: 1
     k8sNodeFilterName: "no-gpu"
     sshd:
       imagePullPolicy: "IfNotPresent"
@@ -311,6 +330,7 @@ slurmNodes:
     sshRootPublicKeys:
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKzxkjzPQ4EyZSjan4MLGFSA18idpZicoKW7Hfff username1"
       - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICL8scMKnwu+Y9S6XDACacZ54+qu+YRo2y4Ieddd username2"
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPzxyrTY1kP9xIXYLC0CikuBm2g6Y556GpaaKfOnDgpJ soperator-test"
     # Either `LoadBalancer` or `NodePort`
     sshdServiceType: "LoadBalancer"
     # Could be needed in case of sshdServiceType == `LoadBalancer`

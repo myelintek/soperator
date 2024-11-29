@@ -1,0 +1,78 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: slurm1
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: slurm-spool-pv
+  labels:
+    pvKind: spool
+spec:
+  capacity:
+    storage: 4Gi  # only a label (without capacity constraint) for local PV, but PVC-capacity could not > this value
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    path: /mnt/k8s_exp/nfs/soperator/spool
+    server: 100.74.51.7
+  claimRef:
+    name: controller-spool-pvc
+    namespace: slurm1
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: slurm-jail-pv
+  labels:
+    pvKind: jail
+spec:
+  capacity:
+    storage: 8Gi  # only a label (without capacity constraint) for local PV, but PVC-capacity could not > this value
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    path: /mnt/k8s_exp/nfs/soperator/jail
+    server: 100.74.51.7
+  claimRef:
+    name: jail-pvc
+    namespace: slurm1
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: controller-spool-pvc
+  namespace: slurm1
+spec:
+  accessModes:
+  - ReadWriteOnce
+  - ReadWriteMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 4Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jail-pvc
+  namespace: slurm1
+spec:
+  accessModes:
+  - ReadWriteOnce
+  - ReadWriteMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 8Gi
+
